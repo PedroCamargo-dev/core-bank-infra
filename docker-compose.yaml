@@ -1,0 +1,228 @@
+name: core-bank
+services:
+  postgres:
+    container_name: postgres
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: securepassword
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - cloudflared
+
+  rabbitmq:
+    container_name: rabbitmq
+    image: rabbitmq:3-management
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbitmq
+      RABBITMQ_DEFAULT_PASS: securepassword
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - cloudflared
+
+  kong-bootstrap:
+    container_name: kong-bootstrap
+    image: kong/kong:latest
+    restart: on-failure
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: postgres
+      KONG_PG_DATABASE: postgres
+      KONG_PG_USER: postgres
+      KONG_PG_PASSWORD: securepassword
+      KONG_PASSWORD: handyshake
+    command: kong migrations bootstrap
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cloudflared
+
+  kong:
+    container_name: kong
+    image: kong/kong:latest
+    restart: on-failure
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: postgres
+      KONG_PG_DATABASE: postgres
+      KONG_PG_USER: postgres
+      KONG_PG_PASSWORD: securepassword
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001, 0.0.0.0:8444 ssl
+      KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002, 0.0.0.0:8445 ssl
+      KONG_ADMIN_GUI_URL: http://${GW_HOST:-localhost}:8002
+      KONG_PASSWORD: handyshake
+    depends_on:
+      kong-bootstrap:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8800:8000"
+      - "8443:8443"
+      - "8001:8001"
+      - "8444:8444"
+      - "8002:8002"
+      - "8445:8445"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - cloudflared
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.53.2
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cloudflared
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:11.2.0
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: adminpassword
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+    networks:
+      - cloudflared
+
+  loki:
+    container_name: loki
+    image: grafana/loki:3.1.1
+    restart: always
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+    networks:
+      - cloudflared
+
+  promtail:
+    container_name: promtail
+    image: grafana/promtail:3.1.1
+    restart: always
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      - cloudflared
+
+  tempo:
+    container_name: tempo
+    image: grafana/tempo:2.6.1
+    restart: always
+    ports:
+      - "3200:3200"
+      - "14318:4318"
+    command: -config.file=/etc/tempo/local-config.yaml
+    volumes:
+      - ./tempo-config.yaml:/etc/tempo/local-config.yaml:ro
+    networks:
+      - cloudflared
+
+  otel-collector:
+    container_name: otel-collector
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    restart: always
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    command: --config /etc/otel-collector/config.yaml
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector/config.yaml:ro
+    depends_on:
+      tempo:
+        condition: service_started
+    networks:
+      - cloudflared
+
+  postgres-exporter:
+    container_name: postgres-exporter
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    restart: always
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:securepassword@postgres:5432/postgres?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cloudflared
+
+  rabbitmq-exporter:
+    container_name: rabbitmq-exporter
+    image: kbudde/rabbitmq-exporter
+    restart: always
+    environment:
+      RABBIT_URL: "http://rabbitmq:15672"
+      RABBIT_USER: "rabbitmq"
+      RABBIT_PASSWORD: "securepassword"
+      PUBLISH_PORT: "9419"
+    ports:
+      - "9419:9419"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cloudflared
+
+networks:
+  cloudflared:
+    external: true
+    name: cloudflared
+
+volumes:
+  pgdata:
+  rabbitmq_data:
