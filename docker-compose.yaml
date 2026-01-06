@@ -171,6 +171,7 @@ services:
     command: -config.file=/etc/tempo/local-config.yaml
     volumes:
       - ./tempo-config.yaml:/etc/tempo/local-config.yaml:ro
+      - tempo_data:/tmp/tempo
     networks:
       - cloudflared
 
@@ -228,3 +229,4 @@ volumes:
   pgdata:
   rabbitmq_data:
   loki_data:
+  tempo_data:
