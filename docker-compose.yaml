@@ -142,6 +142,7 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
     networks:
       - cloudflared
 
@@ -226,3 +227,4 @@ networks:
 volumes:
   pgdata:
   rabbitmq_data:
+  loki_data:
