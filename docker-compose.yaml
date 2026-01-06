@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 10s
@@ -116,7 +116,7 @@ services:
     image: grafana/grafana:11.2.0
     restart: always
     ports:
-      - "3000:3000"
+      - "3300:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: adminpassword
@@ -226,7 +226,7 @@ networks:
     name: cloudflared
 
 volumes:
-  pgdata:
+  pg_data:
   rabbitmq_data:
   loki_data:
   tempo_data:
