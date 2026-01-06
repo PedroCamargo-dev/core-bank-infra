@@ -21,8 +21,8 @@ storage:
   trace:
     backend: local
     local:
-      path: /tmp/tempo/traces
+      path: /var/tempo/traces
 
 metrics_generator:
   storage:
-    path: /tmp/tempo/generator
+    path: /var/tempo/generator
